@@ -1,0 +1,69 @@
+name: Build image(s)
+
+on: [ push ]
+
+env:
+    IMAGE: ghcr.io/vspr-sh/homepage
+      
+permissions:
+    packages: write
+    contents: read
+
+jobs:
+  build:
+    name: Build image
+    runs-on: ubuntu-20.04
+    outputs:
+      # https://github.com/actions/runner/issues/2372
+      # https://stackoverflow.com/questions/73797254/environment-variables-in-github-actions/74217028#74217028
+      image: ${{ env.IMAGE }}
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: [ amd64, i386, arm32v6, arm32v7, arm64v8 ]
+        include:
+          - arch: amd64
+            platform: linux/amd64
+          - arch: i386
+            platform: linux/i386
+          - arch: arm32v6
+            platform: linux/arm/v6
+          - arch: arm32v7
+            platform: linux/arm/v7
+          - arch: arm64v8
+            platform: linux/arm64
+    steps: 
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/metadata-action@v5
+        id: image-metadata
+        with: 
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=${{ matrix.arch }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          push: true
+          platforms: ${{ matrix.platform }}
+          tags: ${{ steps.image-metadata.outputs.tags }}
+
+  merge:
+    runs-on: ubuntu-20.04
+    needs: [ build ]
+    env: 
+      IMAGE: ${{ needs.build.outputs.image }}
+    steps: 
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - run: |
+          docker buildx imagetools create \
+            --tag ${IMAGE}:latest ${IMAGE}:{amd64,i386,arm{32v{6,7},64v8}}
